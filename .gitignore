@@ -1,0 +1,33 @@
+# Environment
+.env
+.env.local
+*.log
+
+# Virtual env
+.venv/
+
+# Data (runtime-generated)
+data/chroma_db/
+data/bm25_index.pkl
+data/vector_index/
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streams credentials cache
+.streamlit/credentials.toml

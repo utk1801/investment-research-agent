@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: invest_agent_psql
+    type: postgres
+    uid: invest_agent_psql
+    access: proxy
+    url: postgres:5432
+    database: invest_agent
+    secureJsonData:
+      password: invest123
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: true
