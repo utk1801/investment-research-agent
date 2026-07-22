@@ -333,37 +333,6 @@ The ticker symbol in the JSON must exist in `scripts/init_db.sql` (or must be ad
 
 ---
 
-## Evaluation Criteria
-
-This project is evaluated on the following criteria:
-
-### 1. Retrieval Quality
-- The retriever must return relevant earnings call chunks for natural-language queries
-- Hybrid search (BM25 + semantic) should score earnings_call documents above news for CEO-commentary queries
-- Ticker filter should correctly scoped results to a single company
-
-### 2. Answer Groundedness
-- Answers must cite only information from retrieved chunks
-- Hallucinations (facts not in retrieved chunks) are penalized
-- Prompt variants B and C enforce stricter groundedness
-
-### 3. End-to-End Pipeline
-- All pipeline steps must complete without errors: `transcripts` → `embed` → `bm25`
-- Stats step shows correct rows in PostgreSQL
-
-### 4. UI Completeness
-- Research page: query → answer → sources → feedback
-- Ingestion page: counts + manual trigger buttons
-- Dashboard page: live metrics from query_log
-
-### 5. Monitoring
-- Grafana dashboard renders all panels with live data
-- Token cost and query volume queries return accurate values
-
-### 6. Feedback Loop
-- Thumbs up/down is recorded to the `feedback` table and appears in Grafana
-- Comment field is optional and only appears when user types text
-
-### 7. Configuration
-- All secrets (API keys, DB passwords) via environment variables
-- `.env.example` documents all required variables
+## Monitoring Dashboard:
+Screenshot for Grafana running locally, showing metrics for our Investment RAG agent:
+<img width="1441" height="771" alt="image" src="https://github.com/user-attachments/assets/e420a9e5-e030-4e45-9db6-a7c323aa3f5c" />
