@@ -99,6 +99,14 @@ Sections include CEO/CFO prepared remarks, financial highlights, analyst Q&A, an
 | AMT | American Tower Corp. | Real Estate |
 
 ---
+Screenshots for Streamlit UI
+RAG Agent's response when info is present in its context:
+<img width="1456" height="769" alt="image" src="https://github.com/user-attachments/assets/955d0f29-83ce-496a-8c88-f61ec8a1c7b4" />
+
+RAG Agent's response when context doesn't contain the required info:
+<img width="1459" height="759" alt="image" src="https://github.com/user-attachments/assets/3c9298da-4200-4da7-a1e9-975cb26a4b80" />
+
+---
 
 ## Setup
 
