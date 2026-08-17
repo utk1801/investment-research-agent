@@ -106,10 +106,10 @@ The configured ticker universe currently includes AAPL, MSFT, NVDA, JPM, GS, UNH
 ---
 ## Screenshots for Streamlit UI
 RAG Agent's response when info is present in its context:
-<img width="1000" height="769" alt="rag context" src="https://github.com/user-attachments/assets/75ed42c0-26d7-4f84-8255-1a8cb1c9c87a" />
+<img width="1000" alt="rag context" src="https://github.com/user-attachments/assets/75ed42c0-26d7-4f84-8255-1a8cb1c9c87a" />
 
 RAG Agent's response when context doesn't contain the required info:
-<img width="1000" height="759" alt="no-context-rag" src="https://github.com/user-attachments/assets/090453af-b7dc-4476-ab2d-ae332a926c63" />
+<img width="1000" alt="no-context-rag" src="https://github.com/user-attachments/assets/090453af-b7dc-4476-ab2d-ae332a926c63" />
 
 ### Other Screenshots
 <table>
@@ -491,9 +491,3 @@ docker compose restart app
 | `CHROMADB_PORT` | `8000` | ChromaDB port |
 | `APP_ENV` | `local` | `local` or `production` |
 | `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` | — | Set by Docker Compose for Airflow metadata |
-
----
-
-## Monitoring Dashboard:
-Screenshot for Grafana running locally, showing metrics for our Investment RAG agent:
-<img width="1441" height="771" alt="image" src="./grafana-screenshot.png" />
