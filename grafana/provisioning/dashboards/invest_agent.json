@@ -41,14 +41,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) FROM query_log",
+          "rawSql": "SELECT COUNT(*) FROM query_log WHERE $__timeFilter(created_at)",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Total Queries",
+      "title": "Total Queries (range)",
       "type": "stat"
     },
     {
@@ -83,14 +83,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) FROM feedback",
+          "rawSql": "SELECT COUNT(*) FROM feedback WHERE $__timeFilter(created_at)",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Total Feedback",
+      "title": "Total Feedback (range)",
       "type": "stat"
     },
     {
@@ -125,14 +125,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(total_time_ms)::int FROM query_log WHERE created_at >= NOW() - INTERVAL '7 days'",
+          "rawSql": "SELECT AVG(total_time_ms)::int FROM query_log WHERE $__timeFilter(created_at)",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Avg Total Time (ms, 7d)",
+      "title": "Avg Total Time (ms)",
       "type": "stat"
     },
     {
@@ -167,14 +167,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT AVG(retrieval_time_ms)::int FROM query_log WHERE created_at >= NOW() - INTERVAL '7 days'",
+          "rawSql": "SELECT AVG(retrieval_time_ms)::int FROM query_log WHERE $__timeFilter(created_at)",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Avg Retrieval Time (ms, 7d)",
+      "title": "Avg Retrieval Time (ms)",
       "type": "stat"
     },
     {
@@ -257,14 +257,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT\n  DATE(created_at) AS time,\n  COUNT(*) AS queries\nFROM query_log\nWHERE $__timeFilter(created_at)\nGROUP BY DATE(created_at)\nORDER BY time",
+          "rawSql": "SELECT\n  $__timeGroupAlias(created_at, '1m'),\n  COUNT(*) AS queries\nFROM query_log\nWHERE $__timeFilter(created_at)\nGROUP BY 1\nORDER BY 1",
           "refId": "A",
           "timeColumn": "created_at",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Queries per Day",
+      "title": "Queries Over Time",
       "type": "timeseries"
     },
     {
@@ -366,14 +366,14 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT\n  DATE(created_at) AS time,\n  AVG(total_time_ms)::int AS avg_total_ms,\n  AVG(retrieval_time_ms)::int AS avg_retrieval_ms\nFROM query_log\nWHERE $__timeFilter(created_at)\nGROUP BY DATE(created_at)\nORDER BY time",
+          "rawSql": "SELECT\n  $__timeGroupAlias(created_at, '1m'),\n  AVG(total_time_ms)::int AS avg_total_ms,\n  AVG(retrieval_time_ms)::int AS avg_retrieval_ms\nFROM query_log\nWHERE $__timeFilter(created_at)\nGROUP BY 1\nORDER BY 1",
           "refId": "A",
           "timeColumn": "created_at",
           "timeGroupInterval": "auto",
           "where": []
         }
       ],
-      "title": "Latency: Total vs Retrieval (ms, by day)",
+      "title": "Latency: Total vs Retrieval (ms)",
       "type": "timeseries"
     },
     {
@@ -469,7 +469,7 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT\n  'thumbs_up' AS label, COUNT(*) AS value\nFROM feedback WHERE thumbs_up = true\nUNION ALL\nSELECT\n  'thumbs_down' AS label, COUNT(*) AS value\nFROM feedback WHERE thumbs_down = true",
+          "rawSql": "SELECT\n  'thumbs_up' AS label, COUNT(*) AS value\nFROM feedback WHERE thumbs_up = true AND $__timeFilter(created_at)\nUNION ALL\nSELECT\n  'thumbs_down' AS label, COUNT(*) AS value\nFROM feedback WHERE thumbs_down = true AND $__timeFilter(created_at)",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
@@ -537,7 +537,7 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT rating, COUNT(*) AS count\nFROM feedback\nWHERE rating IS NOT NULL\nGROUP BY rating\nORDER BY rating",
+          "rawSql": "SELECT rating, COUNT(*) AS count\nFROM feedback\nWHERE rating IS NOT NULL AND $__timeFilter(created_at)\nGROUP BY rating\nORDER BY rating",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
@@ -630,8 +630,8 @@
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": "value",
+          "values": true
         },
         "tooltip": {
           "mode": "single",
@@ -648,7 +648,7 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT\n  CASE prompt_variant\n    WHEN 'A' THEN 'Variant A'\n    WHEN 'B' THEN 'Variant B'\n    WHEN 'C' THEN 'Variant C'\n    ELSE 'Unknown'\n  END AS label,\n  COUNT(*) AS value\nFROM query_log\nWHERE prompt_variant IS NOT NULL\nGROUP BY prompt_variant",
+          "rawSql": "WITH variants AS (\n  SELECT 'A' AS code, 'Variant A' AS metric\n  UNION ALL SELECT 'B', 'Variant B'\n  UNION ALL SELECT 'C', 'Variant C'\n)\nSELECT\n  v.metric,\n  COUNT(q.id)::float AS value\nFROM variants v\nLEFT JOIN query_log q\n  ON q.prompt_variant = v.code\n AND $__timeFilter(q.created_at)\nGROUP BY v.code, v.metric\nORDER BY v.code",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
@@ -712,7 +712,7 @@
           "group": [],
           "metricColumn": "none",
           "rawQuery": true,
-          "rawSql": "SELECT\n  retrieval_chunk_count AS buckets,\n  COUNT(*) AS count\nFROM query_log\nWHERE retrieval_chunk_count IS NOT NULL\nGROUP BY retrieval_chunk_count\nORDER BY buckets",
+          "rawSql": "SELECT\n  retrieval_chunk_count AS buckets,\n  COUNT(*) AS count\nFROM query_log\nWHERE retrieval_chunk_count IS NOT NULL AND $__timeFilter(created_at)\nGROUP BY retrieval_chunk_count\nORDER BY buckets",
           "refId": "A",
           "timeColumn": "none",
           "timeGroupInterval": "auto",
@@ -730,11 +730,11 @@
         "y": 0
       },
       "id": 11,
-      "title": "Total LLM Cost (7d)",
+      "title": "Total LLM Cost",
       "type": "stat",
       "targets": [
         {
-          "rawSql": "SELECT COALESCE(SUM(total_cost_usd)::float, 0) FROM query_log WHERE created_at >= NOW() - INTERVAL '7 days'",
+          "rawSql": "SELECT COALESCE(SUM(total_cost_usd)::float, 0) FROM query_log WHERE $__timeFilter(created_at)",
           "refId": "A",
           "format": "table",
           "datasource": {
@@ -780,11 +780,11 @@
         "y": 0
       },
       "id": 14,
-      "title": "Total Tokens (7d)",
+      "title": "Total Tokens",
       "type": "stat",
       "targets": [
         {
-          "rawSql": "SELECT COALESCE(SUM(total_tokens), 0) FROM query_log WHERE created_at >= NOW() - INTERVAL '7 days'",
+          "rawSql": "SELECT COALESCE(SUM(total_tokens), 0) FROM query_log WHERE $__timeFilter(created_at)",
           "refId": "A",
           "format": "table",
           "datasource": {
@@ -828,11 +828,11 @@
         "y": 20
       },
       "id": 12,
-      "title": "Avg Cost & Tokens per Query (daily)",
+      "title": "Avg Cost & Tokens per Query",
       "type": "timeseries",
       "targets": [
         {
-          "rawSql": "SELECT DATE(created_at) AS time, ROUND(AVG(total_cost_usd)::numeric, 6) AS avg_cost_usd, AVG(total_tokens)::int AS avg_tokens FROM query_log WHERE $__timeFilter(created_at) AND total_cost_usd IS NOT NULL GROUP BY DATE(created_at) ORDER BY time",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1m'), ROUND(AVG(total_cost_usd)::numeric, 6) AS avg_cost_usd, AVG(total_tokens)::int AS avg_tokens FROM query_log WHERE $__timeFilter(created_at) AND total_cost_usd IS NOT NULL GROUP BY 1 ORDER BY 1",
           "refId": "A",
           "format": "time_series",
           "timeColumn": "created_at",
@@ -909,11 +909,11 @@
         "y": 20
       },
       "id": 13,
-      "title": "Cumulative LLM Cost by Model",
+      "title": "LLM Cost by Model",
       "type": "timeseries",
       "targets": [
         {
-          "rawSql": "SELECT DATE(created_at) AS time, model_used, SUM(total_cost_usd) AS daily_cost FROM query_log WHERE $__timeFilter(created_at) GROUP BY DATE(created_at), model_used ORDER BY time, model_used",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1m'), model_used, SUM(total_cost_usd) AS cost FROM query_log WHERE $__timeFilter(created_at) GROUP BY 1, model_used ORDER BY 1, model_used",
           "refId": "A",
           "format": "time_series",
           "timeColumn": "created_at",
@@ -987,9 +987,96 @@
           "sort": "none"
         }
       }
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "invest_agent_psql"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_cost_usd"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 15,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "invest_agent_psql"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at AS time, query_text, model_used, prompt_variant, retrieval_chunk_count, total_tokens, total_cost_usd FROM query_log WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 20",
+          "refId": "A",
+          "timeColumn": "created_at"
+        }
+      ],
+      "title": "Recent Queries",
+      "type": "table"
     }
   ],
-  "refresh": "30s",
+  "refresh": "10s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": [
@@ -999,13 +1086,13 @@
     "list": []
   },
   "time": {
-    "from": "now-30d",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "Investment Research Agent",
   "uid": "invest-agent-overview",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

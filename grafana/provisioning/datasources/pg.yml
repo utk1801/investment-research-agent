@@ -1,17 +1,27 @@
 apiVersion: 1
 
+deleteDatasources:
+  - name: invest_agent_psql
+    orgId: 1
+
 datasources:
   - name: invest_agent_psql
+    orgId: 1
     type: postgres
     uid: invest_agent_psql
     access: proxy
     url: postgres:5432
-    database: invest_agent
+    user: invest_agent
     secureJsonData:
       password: invest123
     jsonData:
+      database: invest_agent
       sslmode: disable
       postgresVersion: 1600
       timescaledb: false
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    version: 2
     isDefault: true
-    editable: true
+    editable: false

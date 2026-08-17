@@ -57,8 +57,14 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 EMBEDDING_DIM = 384  # all-MiniLM-L6-v2 output dimension
 
 RERANKER_MODEL = os.getenv(
-    "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-128"
+    "RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
 )
+if RERANKER_MODEL == "cross-encoder/ms-marco-MiniLM-L-6-128":
+    RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_RETRIEVAL_APPROACH = os.getenv("DEFAULT_RETRIEVAL_APPROACH", "hybrid")
+ENABLE_QUERY_REWRITING = os.getenv("ENABLE_QUERY_REWRITING", "true").lower() in {
+    "1", "true", "yes", "on"
+}
 
 RETRIEVAL_TOP_K_HYBRID = 20   # candidates before reranking
 RETRIEVAL_TOP_K_FINAL = 5     # chunks passed to LLM
@@ -75,7 +81,7 @@ TICKERS: dict[str, list[str]] = {
     "Technology":   ["AAPL", "MSFT", "NVDA"],
     "Finance":      ["JPM",  "GS"],
     "Healthcare":   ["UNH",  "LLY"],
-    "Consumer":     ["AMZN", "WMT"],
+    "Consumer":     ["AMZN", "WMT", "TSLA"],
     "Energy":       ["XOM"],
     "Industrials":  ["CAT"],
     "Real Estate":  ["AMT"],

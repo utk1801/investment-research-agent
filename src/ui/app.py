@@ -1,4 +1,4 @@
-"""Streamlit app — sidebar nav + page routing."""
+"""Streamlit app — shared sidebar settings and home page."""
 
 from __future__ import annotations
 
@@ -58,18 +58,24 @@ def render_sidebar() -> dict:
             options=["A — Basic", "B — Structured + Citations", "C — Conservative"],
             index=1,
         )
-
-        st.divider()
-        st.caption("**Navigation**")
-        st.page_link("app.py", label="🏠 Home", icon="🏠")
-        st.page_link("pages/research.py", label="🔍 Research", icon="🔍")
-        st.page_link("pages/ingestion.py", label="📥 Ingestion", icon="📥")
-        st.page_link("pages/dashboard.py", label="📊 Dashboard", icon="📊")
+        retrieval_approach = st.selectbox(
+            "Retrieval",
+            options=[
+                "hybrid — Hybrid",
+                "hybrid_rerank — Hybrid + rerank",
+                "vector — Vector only",
+                "bm25 — Keyword only",
+            ],
+            index=0,
+        )
+        rewrite_query = st.toggle("Rewrite queries", value=True)
 
     return {
         "ticker": selected_ticker,
         "model": model,
         "prompt_variant": prompt_variant.split(" — ")[0],
+        "retrieval_approach": retrieval_approach.split(" — ")[0],
+        "rewrite_query": rewrite_query,
     }
 
 
@@ -104,7 +110,25 @@ def render_home():
     st.divider()
 
 
-if __name__ == "__main__":
+def render_home_page():
     prefs = render_sidebar()
-    render_home()
     st.session_state["prefs"] = prefs
+    render_home()
+
+
+def main():
+    page = st.navigation(
+        [
+            st.Page(render_home_page, title="Home", icon=":material/home:", default=True),
+            st.Page("pages/research.py", title="Research", icon=":material/search:"),
+            st.Page("pages/evaluation.py", title="Evaluation", icon=":material/science:"),
+            st.Page("pages/ingestion.py", title="Ingestion", icon=":material/cloud_upload:"),
+            st.Page("pages/dashboard.py", title="Dashboard", icon=":material/monitoring:"),
+        ],
+        position="top",
+    )
+    page.run()
+
+
+if __name__ == "__main__":
+    main()

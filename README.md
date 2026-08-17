@@ -52,7 +52,10 @@ User question ──▶ Hybrid Retriever ◀────────────
 - **PostgreSQL** — document store + query/feedback logs
 - **ChromaDB** — vector embeddings (sentence-transformers: `all-MiniLM-L6-v2`)
 - **BM25** — keyword search (rank_bm25)
+- **Cross-encoder reranking** — optional reranker for final hybrid candidates
+- **RAG evaluation** — retrieval and generation benchmarks persisted to PostgreSQL
 - **OpenAI** — answer synthesis (`gpt-4o`)
+- **Apache Airflow** — scheduled ingestion and index rebuild orchestration
 - **Grafana** — metrics dashboards
 
 ---
@@ -79,7 +82,9 @@ JSON files in `data/transcripts/`, one per ticker per quarter:
 }
 ```
 
-Sections include CEO/CFO prepared remarks, financial highlights, analyst Q&A, and forward outlook — rich narrative text for retrieval. Currently covers: AAPL, MSFT, JPM, NVDA, AMZN, GS (10 transcript files).
+Sections include CEO/CFO prepared remarks, financial highlights, analyst Q&A, and forward outlook — rich narrative text for retrieval.
+
+The configured ticker universe currently includes AAPL, MSFT, NVDA, JPM, GS, UNH, LLY, AMZN, WMT, XOM, CAT, and AMT. Static transcript files exist for the covered companies in `data/transcripts/`; a transcript for a new ticker is only ingested after that ticker is added to both app config and Postgres.
 
 ### Tickers (12 companies)
 
@@ -136,8 +141,60 @@ This starts:
 - **ChromaDB** on `localhost:8000`
 - **Streamlit app** on `localhost:8501`
 - **Grafana** on `localhost:3000` (admin / admin123)
+- **Airflow** on `localhost:8080` (airflow / airflow)
 
-### 4. Ingest transcripts → ChromaDB → Build index
+For an existing stack where the app image is already running, start only Airflow
+without rebuilding the app container:
+
+```bash
+docker compose build airflow-init airflow-webserver airflow-scheduler
+docker compose up -d --no-build airflow-init airflow-webserver airflow-scheduler
+```
+
+### 4. Automated ingestion with Airflow
+
+Airflow runs the `investment_research_ingestion` DAG daily at 6am Pacific time
+and can also be triggered manually from the Airflow UI.
+
+Open Airflow:
+
+- URL: `http://localhost:8080`
+- Username: `airflow`
+- Password: `airflow`
+
+The DAG orchestrates:
+
+1. `fetch_market_data`
+2. `ingest_transcripts`
+3. `backfill_financial_docs`
+4. `rebuild_embeddings`
+5. `rebuild_bm25`
+6. `collect_stats`
+
+Each Airflow task runs the existing ingestion command inside the `invest_app`
+container, so the scheduled job uses the same code and dependencies as the
+Streamlit application.
+
+To run the flow manually:
+
+1. Open `http://localhost:8080`
+2. Log in with `airflow` / `airflow`
+3. Open the `investment_research_ingestion` DAG
+4. Click the trigger/play button
+5. Check task logs from the DAG run graph if a step fails
+
+The full DAG should be used after adding a new transcript because it loads the
+JSON, regenerates financial docs, rebuilds Chroma embeddings, and rebuilds BM25.
+If you only need one step, open the DAG graph and run or clear that task from the
+Airflow UI.
+
+To restart only Airflow services:
+
+```bash
+docker compose up -d --no-build airflow-init airflow-webserver airflow-scheduler
+```
+
+### 5. Manual fallback: ingest transcripts → ChromaDB → Build index
 
 ```bash
 uv run python -m src.pipeline.run_ingestion --step transcripts
@@ -187,10 +244,27 @@ How does Goldman Sachs CEO view the 2026 deal pipeline?
 
 Configure in the Research page sidebar:
 - **Model**: `gpt-4o` (default), `gpt-4o-mini`, `gpt-3.5-turbo`
+- **Retrieval**: `hybrid` (default), `hybrid_rerank`, `vector`, or `bm25`
+- **Query rewriting**: expands ticker/company and financial concept terms before retrieval
 - **Prompt variant**: A, B, or C
   - **A** — standard grounded answer
   - **B** — structured `[Findings] → [Data] → [Limitations]` with `[Source N]` citations
   - **C** — conservative; says "not available" instead of inferring
+
+### Evaluation Page (localhost:8501/evaluation)
+
+Run repeatable RAG benchmarks from the UI:
+
+- **Retrieval evaluation** compares BM25, vector search, hybrid search, and hybrid+rerank using hit rate, precision@k, MRR, and nDCG@k.
+- **Generation evaluation** compares prompt variants A, B, and C using fact coverage, groundedness, citation score, latency, tokens, and estimated cost.
+- Results are stored in PostgreSQL tables: `evaluation_runs`, `retrieval_evaluation_results`, and `generation_evaluation_results`.
+
+CLI equivalent:
+
+```bash
+uv run python -m src.evaluation.runner --retrieval-only
+uv run python -m src.evaluation.runner
+```
 
 ### Ingestion Page (localhost:8501/ingestion)
 
@@ -198,6 +272,12 @@ Configure in the Research page sidebar:
 - **Run Ingestion** — pull latest data from yfinance (prices, financials, news) into PostgreSQL
 - **Build Index** — re-embed all documents into ChromaDB and rebuild BM25
 - **Backfill** — export quarterly financial metrics as searchable documents
+- **Airflow link** — open scheduled orchestration for automated ingestion runs
+
+`Backfill` does not fetch new market data. It converts existing rows in
+`financial_metrics` into `documents` rows with `doc_type = financial`, then the
+index must be rebuilt before those generated docs are searchable. The Airflow
+DAG handles this rebuild automatically after the backfill step.
 
 ### Dashboard Page (localhost:8501/dashboard)
 
@@ -207,36 +287,50 @@ Live stats: total queries, feedback counts, average response times.
 
 ## Monitoring
 
-Grafana dashboard at `localhost:3000` (admin / admin123) shows:
+Grafana dashboard at `localhost:3000` (admin / admin123) is provisioned automatically by Docker.
+The `invest_agent_psql` datasource is recreated on startup from `grafana/provisioning/datasources/pg.yml`,
+so you do not need to manually add or test the Postgres connection in the Grafana UI.
 
-- Queries per day (time series)
-- Total LLM cost and token count (7-day rolling)
+The dashboard shows:
+
+- Queries over time
+- Total LLM cost and token count for the selected time range
 - Avg retrieval time vs total time (lower is faster)
 - Thumbs Up / Down ratio (pie chart)
-- Rating distribution (if using star ratings)
-- Cumulative cost by model over time
+- Prompt variant usage (pie chart)
+- Retrieval chunk count distribution
+- Recent queries table
 
 **Key PostgreSQL queries for Grafana:**
 
 ```sql
--- Queries per day
-SELECT DATE(created_at) AS time, COUNT(*) AS queries
-FROM query_log WHERE $__timeFilter(created_at)
-GROUP BY DATE(created_at) ORDER BY time
+-- Queries over time
+SELECT
+  $__timeGroupAlias(created_at, '1m'),
+  COUNT(*) AS queries
+FROM query_log
+WHERE $__timeFilter(created_at)
+GROUP BY 1
+ORDER BY 1
 
 -- Thumbs ratio
 SELECT 'thumbs_up' AS label, COUNT(*) AS value
-FROM feedback WHERE thumbs_up = true
+FROM feedback
+WHERE thumbs_up = true AND $__timeFilter(created_at)
 UNION ALL
-SELECT 'thumbs_down', COUNT(*) FROM feedback WHERE thumbs_down = true
+SELECT 'thumbs_down', COUNT(*)
+FROM feedback
+WHERE thumbs_down = true AND $__timeFilter(created_at)
 
 -- Cost over time
-SELECT DATE(created_at) AS time,
+SELECT
+  $__timeGroupAlias(created_at, '1m'),
   SUM(total_cost_usd) AS cost_usd,
   SUM(total_tokens) AS tokens
 FROM query_log
 WHERE $__timeFilter(created_at)
-GROUP BY DATE(created_at) ORDER BY time
+GROUP BY 1
+ORDER BY 1
 ```
 
 ---
@@ -256,15 +350,22 @@ src/
 │   ├── retriever.py          # Hybrid retriever (BM25 + ChromaDB, weighted blend)
 │   ├── embed.py              # Sentence-transformer embedder
 │   └── bm25_index.py         # Rank BM25 index
+├── query_rewriting/
+│   └── rewriter.py           # Rule-based ticker/company/concept query expansion
+├── evaluation/
+│   ├── dataset.py            # Labeled RAG evaluation questions
+│   ├── scoring.py            # Retrieval + generation metrics
+│   ├── storage.py            # Evaluation tables + schema guards
+│   └── runner.py             # CLI/UI evaluation runner
 ├── llm/
 │   └── client.py             # OpenAI client + prompt variants (A/B/C)
 ├── monitoring/
 │   └── metrics.py            # log_query(), log_feedback() → PostgreSQL
-├── query_rewriting/          # (optional) query expansion hooks
 └── ui/
     ├── app.py                # Streamlit navigation shell
     └── pages/
         ├── research.py       # Main chat interface + feedback
+        ├── evaluation.py     # RAG retrieval/generation evaluation runner
         ├── ingestion.py      # Ingestion controls + ticker stats table
         └── dashboard.py      # Live metrics from query_log
 
@@ -280,6 +381,12 @@ grafana/provisioning/
 scripts/
 └── init_db.sql              # Schema: tickers, financial_metrics, prices,
                              # documents, query_log, feedback
+
+airflow/
+└── dags/
+    └── investment_ingestion_dag.py  # Scheduled ingestion DAG
+
+Dockerfile.airflow           # Lightweight Airflow image with Docker CLI
 ```
 
 ---
@@ -297,13 +404,20 @@ data/transcripts/
 └── NEW_TICKER_Q1_2025.json   # ← add here
 ```
 
-Then re-ingest and rebuild the index:
+If the ticker already exists in `src/config.py` and the `tickers` table, trigger
+the `investment_research_ingestion` DAG in Airflow. The DAG will ingest the JSON
+and rebuild both indexes.
+
+Manual equivalent:
 
 ```bash
 uv run python -m src.pipeline.run_ingestion --step transcripts
 uv run python -m src.pipeline.run_ingestion --step embed --reset
 uv run python -m src.pipeline.run_ingestion --step bm25
 ```
+
+Transcript ingestion is idempotent: rerunning the Airflow DAG updates the
+matching static transcript instead of inserting duplicate document rows.
 
 **Required JSON fields:**
 ```json
@@ -322,7 +436,29 @@ uv run python -m src.pipeline.run_ingestion --step bm25
 }
 ```
 
-The ticker symbol in the JSON must exist in `scripts/init_db.sql` (or must be added to the `INSERT INTO tickers` seed list there).
+The ticker symbol in the JSON must exist in:
+
+- `src/config.py` under `TICKERS`
+- the Postgres `tickers` table
+- `scripts/init_db.sql` for fresh database setup reproducibility
+
+For example, to add TSLA:
+
+1. Add `TSLA` to the `TICKERS` dictionary in `src/config.py`.
+2. Add `('TSLA', 'Tesla Inc.', 'Consumer')` to the seed list in `scripts/init_db.sql`.
+3. Add TSLA to the already-running database:
+
+```bash
+docker exec invest_postgres psql -U invest_agent -d invest_agent -c "INSERT INTO tickers (symbol, name, sector) VALUES ('TSLA', 'Tesla Inc.', 'Consumer') ON CONFLICT (symbol) DO NOTHING;"
+```
+
+4. Restart the app container so the running Python process sees the updated ticker config:
+
+```bash
+docker compose restart app
+```
+
+5. Trigger `investment_research_ingestion` in Airflow.
 
 ---
 
@@ -333,14 +469,18 @@ The ticker symbol in the JSON must exist in `scripts/init_db.sql` (or must be ad
 | `OPENAI_API_KEY` | — | Required. OpenAI API key |
 | `LLM_MODEL` | `gpt-4o` | LLM model name |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformer model |
+| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Optional cross-encoder reranker |
+| `DEFAULT_RETRIEVAL_APPROACH` | `hybrid` | `bm25`, `vector`, `hybrid`, or `hybrid_rerank` |
+| `ENABLE_QUERY_REWRITING` | `true` | Expand ticker/company/concept terms before retrieval |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `CHROMADB_HOST` | `localhost` | ChromaDB host |
 | `CHROMADB_PORT` | `8000` | ChromaDB port |
 | `APP_ENV` | `local` | `local` or `production` |
+| `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` | — | Set by Docker Compose for Airflow metadata |
 
 ---
 
 ## Monitoring Dashboard:
 Screenshot for Grafana running locally, showing metrics for our Investment RAG agent:
-<img width="1441" height="771" alt="image" src="https://github.com/user-attachments/assets/e420a9e5-e030-4e45-9db6-a7c323aa3f5c" />
+<img width="1441" height="771" alt="image" src="./grafana-screenshot.png" />

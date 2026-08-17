@@ -18,6 +18,51 @@ def _engine():
     return create_engine(get_db_url())
 
 
+def _ensure_documents_schema(engine) -> None:
+    """Keep document constraints compatible with repeatable Airflow ingestion."""
+    statements = [
+        """
+        ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_doc_type_check
+        """,
+        """
+        ALTER TABLE documents
+            ADD CONSTRAINT documents_doc_type_check
+            CHECK (doc_type IN ('earnings_call', 'news', 'financial'))
+        """,
+        """
+        DELETE FROM documents d
+        USING (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ticker_id, doc_type, source, title,
+                                    COALESCE(doc_date, DATE '0001-01-01')
+                       ORDER BY id
+                   ) AS rn
+            FROM documents
+            WHERE doc_type = 'earnings_call'
+              AND source = 'static'
+        ) dup
+        WHERE d.id = dup.id
+          AND dup.rn > 1
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_static_transcript_unique
+            ON documents (
+                ticker_id,
+                doc_type,
+                source,
+                title,
+                (COALESCE(doc_date, DATE '0001-01-01'))
+            )
+            WHERE doc_type = 'earnings_call'
+              AND source = 'static'
+        """,
+    ]
+    with engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+
+
 def _get_ticker_id(engine, symbol: str) -> int | None:
     with engine.begin() as conn:
         result = conn.execute(
@@ -58,6 +103,7 @@ def _assemble_content(data: dict) -> str:
 def ingest_transcripts() -> dict:
     """Load all transcripts from TRANSCRIPT_DIR and write to documents table."""
     engine = _engine()
+    _ensure_documents_schema(engine)
     transcript_dir = Path(TRANSCRIPT_DIR)
 
     if not transcript_dir.exists():
@@ -71,7 +117,7 @@ def ingest_transcripts() -> dict:
 
     log.info("Found %d transcript files in %s", len(files), transcript_dir)
 
-    counts = {"loaded": 0, "skipped": 0, "errors": 0}
+    counts = {"upserted": 0, "skipped": 0, "errors": 0}
 
     for fpath in sorted(files):
         try:
@@ -104,7 +150,17 @@ def ingest_transcripts() -> dict:
                 text("""
                     INSERT INTO documents (ticker_id, doc_type, title, content, doc_date, source)
                     VALUES (:ticker_id, 'earnings_call', :title, :content, :doc_date, 'static')
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (
+                        ticker_id,
+                        doc_type,
+                        source,
+                        title,
+                        (COALESCE(doc_date, DATE '0001-01-01'))
+                    )
+                    WHERE doc_type = 'earnings_call'
+                      AND source = 'static'
+                    DO UPDATE SET
+                        content = EXCLUDED.content
                 """),
                 {
                     "ticker_id": ticker_id,
@@ -113,11 +169,11 @@ def ingest_transcripts() -> dict:
                     "doc_date": doc_date,
                 },
             )
-        counts["loaded"] += 1
-        log.info("  Loaded %s — %s", ticker, data.get("quarter", ""))
+        counts["upserted"] += 1
+        log.info("  Upserted %s — %s", ticker, data.get("quarter", ""))
 
-    log.info("Transcript ingest done: loaded=%d skipped=%d errors=%d",
-             counts["loaded"], counts["skipped"], counts["errors"])
+    log.info("Transcript ingest done: upserted=%d skipped=%d errors=%d",
+             counts["upserted"], counts["skipped"], counts["errors"])
     return counts
 
 
@@ -126,18 +182,11 @@ if __name__ == "__main__":
     _logging.basicConfig(level=_logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s",
                          stream=sys.stdout)
 
-    # Only ingest transcripts
-    engine = _engine()
     counts = ingest_transcripts()
 
-    # Also delete old earnings/transcript docs so we don't duplicate on re-run
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM documents WHERE doc_type = 'earnings_call' AND source = 'static'"))
-
-    # Re-ingest
-    counts2 = ingest_transcripts()
-
     # Stats
+    engine = _engine()
     with engine.connect() as conn:
         total = conn.execute(text("SELECT COUNT(*) FROM documents WHERE doc_type = 'earnings_call'")).scalar()
+        log.info("Ingest result: %s", counts)
         log.info("Documents table now has %d earnings_call rows", total)

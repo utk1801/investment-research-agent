@@ -1,4 +1,36 @@
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  env_file:
+    - .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://invest_agent:invest123@postgres:5432/invest_agent
+    AIRFLOW__WEBSERVER__SECRET_KEY: investment-research-agent-local
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW_INGESTION_CONTAINER: invest_app
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: 5432
+    CHROMADB_HOST: chromadb
+    CHROMADB_PORT: 8000
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - airflow_logs:/opt/airflow/logs
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    postgres:
+      condition: service_healthy
+    chromadb:
+      condition: service_started
+    app:
+      condition: service_started
+
 services:
+
   # ── PostgreSQL ───────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
@@ -57,12 +89,16 @@ services:
     image: grafana/grafana:latest
     container_name: invest_grafana
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin123
       GF_SERVER_ROOT_URL: http://localhost:3000
       GF_SERVER_PORT: 3000
+      POSTGRES_DB: invest_agent
+      POSTGRES_USER: invest_agent
+      POSTGRES_PASSWORD: invest123
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -70,7 +106,46 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
+  # ── Airflow Orchestration ────────────────────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: invest_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname Investment \
+          --lastname Agent \
+          --role Admin \
+          --email airflow@example.com || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: invest_airflow_webserver
+    command: webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: invest_airflow_scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   pgdata:
   chroma_data:
   grafana_data:
+  airflow_logs:

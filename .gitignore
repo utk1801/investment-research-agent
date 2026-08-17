@@ -1,16 +1,28 @@
-# Environment
+# Environment and secrets
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 
 # Virtual env
 .venv/
+venv/
+env/
 
-# Data (runtime-generated)
+# Data and indexes (runtime-generated)
 data/chroma_db/
 data/bm25_index.pkl
 data/vector_index/
 *.db
+*.sqlite
+*.sqlite3
+
+# Airflow runtime files
+airflow/logs/
+airflow/*.db
+airflow/*.pid
+airflow/airflow.cfg
+airflow/standalone_admin_password.txt
 
 # Python
 __pycache__/
@@ -18,6 +30,9 @@ __pycache__/
 *.so
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # IDE
 .idea/
@@ -29,5 +44,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Streams credentials cache
+# Streamlit local state and credentials
 .streamlit/credentials.toml
+.streamlit/secrets.toml

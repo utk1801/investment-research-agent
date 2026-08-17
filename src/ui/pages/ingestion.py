@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 from sqlalchemy import create_engine, text
 
-from src.ui.app import render_sidebar, render_home
+from src.ui.app import render_sidebar
 from src.config import get_db_url
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
@@ -71,6 +71,20 @@ def render_ingestion():
     ):
         with col:
             st.metric(label=name, value=f"{count:,}" if count else "0", delta="✅" if count else "❌")
+
+    st.divider()
+
+    with st.container(border=True):
+        st.subheader("Scheduled automation")
+        st.write(
+            "Airflow runs the `investment_research_ingestion` DAG for scheduled "
+            "fetch, transcript ingestion, backfill, embedding rebuild, and BM25 rebuild."
+        )
+        st.link_button(
+            "Open Airflow",
+            "http://localhost:8080",
+            icon=":material/open_in_new:",
+        )
 
     st.divider()
 
@@ -138,5 +152,6 @@ def render_ingestion():
 
 
 if __name__ == "__main__":
-    render_home()
+    prefs = render_sidebar()
+    st.session_state["prefs"] = prefs
     render_ingestion()

@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 
 from src.config import get_db_url
+from src.evaluation.storage import ensure_runtime_schema
 
 
 @dataclass
@@ -40,6 +41,7 @@ class MetricsLogger:
     def __init__(self, db_url: Optional[str] = None):
         self.db_url = db_url or get_db_url()
         self._engine = create_engine(self.db_url, poolclass=NullPool)
+        ensure_runtime_schema(self._engine)
 
     def log_query(self, metrics: QueryMetrics) -> int:
         """Insert a query_log row. Returns the query_id."""
@@ -161,11 +163,11 @@ def _logger() -> MetricsLogger:
 def log_query(
     query_text: str,
     ticker_filter: str | None,
-    answer_preview: str,
     retrieval_chunk_count: int,
     retrieval_time_ms: int,
     model: str,
     prompt_variant: str,
+    rewritten_query: str | None = None,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     total_tokens: int = 0,
@@ -178,7 +180,7 @@ def log_query(
         metrics = QueryMetrics(
             query_text=query_text,
             ticker_filter=ticker_filter,
-            rewritten_query=answer_preview,
+            rewritten_query=rewritten_query,
             retrieval_chunk_count=retrieval_chunk_count,
             retrieval_time_ms=retrieval_time_ms,
             total_time_ms=retrieval_time_ms,

@@ -14,15 +14,18 @@ from sentence_transformers import CrossEncoder
 from src.config import (
     CHROMA_DIR, COLLECTION_NAME, EMBEDDING_DIM,
     RETRIEVAL_TOP_K_HYBRID, RETRIEVAL_TOP_K_FINAL, RRF_K,
-    EMBEDDING_MODEL,
+    EMBEDDING_MODEL, RERANKER_MODEL, DEFAULT_RETRIEVAL_APPROACH,
+    ENABLE_QUERY_REWRITING, ALL_TICKERS,
 )
 from src.retrieval.bm25_index import BM25Index
 from src.retrieval.embed import Embedder
+from src.query_rewriting import rewrite_query
 
 log = logging.getLogger(__name__)
 
 # ── ticker id map ──────────────────────────────────────────────────────────────
 _TICKER_ID_MAP: dict[str, int] = {}
+_XC_MODEL: CrossEncoder | None = None
 
 
 def _init_ticker_map() -> None:
@@ -46,6 +49,8 @@ class HybridRetriever:
         self._chroma = None
         self._bm25: BM25Index | None = None
         self._xc_model: CrossEncoder | None = None
+        self.last_rewritten_query: str | None = None
+        self.last_retrieval_metadata: dict = {}
         _init_ticker_map()
         self._load()
 
@@ -80,7 +85,7 @@ class HybridRetriever:
     @staticmethod
     def _extract_tickers(query: str) -> list[str]:
         """Extract known ticker symbols from query."""
-        known = list(_TICKER_ID_MAP.keys())
+        known = list(_TICKER_ID_MAP.keys()) or ALL_TICKERS
         found = []
         for t in known:
             if t.lower() in query.lower():
@@ -124,19 +129,54 @@ class HybridRetriever:
         return sorted(d, key=lambda x: d[x]["rrf"], reverse=True)
 
     # ── Retrieve ────────────────────────────────────────────────────────────────
-    def retrieve(self, query: str, top_k: int = RETRIEVAL_TOP_K_FINAL) -> list[dict]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = RETRIEVAL_TOP_K_FINAL,
+        approach: str = DEFAULT_RETRIEVAL_APPROACH,
+        rewrite: bool = ENABLE_QUERY_REWRITING,
+    ) -> list[dict]:
         t0 = time.time()
-        query_emb = self.embedder.embed([query])[0]
+        valid_approaches = {"bm25", "vector", "hybrid", "hybrid_rerank"}
+        if approach not in valid_approaches:
+            raise ValueError(f"Unknown retrieval approach '{approach}'. Expected one of {sorted(valid_approaches)}")
+
+        rewrite_info = rewrite_query(query) if rewrite else None
+        search_query = rewrite_info.rewritten_query if rewrite_info else query
+        self.last_rewritten_query = search_query
+        self.last_retrieval_metadata = {
+            "approach": approach,
+            "rewrite_enabled": rewrite,
+            "rewrite_additions": rewrite_info.additions if rewrite_info else [],
+        }
+
+        query_emb = self.embedder.embed([search_query])[0]
 
         chroma_results = self._chroma_search(query_emb, n=RETRIEVAL_TOP_K_HYBRID)
-        bm25_results = self._bm25_search(query, n=RETRIEVAL_TOP_K_HYBRID)
+        bm25_results = self._bm25_search(search_query, n=RETRIEVAL_TOP_K_HYBRID)
 
         if not chroma_results and not bm25_results:
             log.warning("No results from ChromaDB or BM25")
             return []
 
+        if approach == "vector":
+            self._normalize_global(chroma_results, "_score")
+            self._normalize_global(chroma_results, "_chroma_score")
+            candidates = chroma_results
+            if self.ticker_filter:
+                candidates = self._apply_ticker_filter(candidates)
+            return candidates[:top_k]
+
+        if approach == "bm25":
+            self._normalize_global(bm25_results, "_score")
+            self._normalize_global(bm25_results, "_bm25_score")
+            candidates = bm25_results
+            if self.ticker_filter:
+                candidates = self._apply_ticker_filter(candidates)
+            return candidates[:top_k]
+
         # Normalize based on query type
-        info = self._classify_query(query)
+        info = self._classify_query(search_query)
         if info["strategy"] == "keyword_heavy":
             # BM25 naturally favors financial docs for metric queries; use global norm
             self._normalize_global(chroma_results, "_score")
@@ -200,15 +240,24 @@ class HybridRetriever:
 
         # Apply ticker filter from top candidates (after blend)
         if self.ticker_filter:
-            tid = _TICKER_ID_MAP.get(self.ticker_filter)
-            if tid:
-                filtered = [d for d in candidates if d.get("ticker_id") == tid]
-                if filtered:
-                    candidates = filtered
+            candidates = self._apply_ticker_filter(candidates)
+
+        if approach == "hybrid_rerank":
+            rerank_pool = candidates[: max(top_k, min(len(candidates), RETRIEVAL_TOP_K_HYBRID))]
+            reranked = self._rerank(search_query, rerank_pool)
+            remainder_ids = {d.get("doc_id") for d in reranked}
+            candidates = reranked + [d for d in candidates if d.get("doc_id") not in remainder_ids]
 
         log.info("Retrieval done in %.1fs — %d docs returned",
                  time.time() - t0, len(candidates[:top_k]))
         return candidates[:top_k]
+
+    def _apply_ticker_filter(self, candidates: list[dict]) -> list[dict]:
+        tid = _TICKER_ID_MAP.get(self.ticker_filter or "")
+        if not tid:
+            return candidates
+        filtered = [d for d in candidates if d.get("ticker_id") == tid]
+        return filtered or candidates
 
     # ── ChromaDB ───────────────────────────────────────────────────────────────
     def _chroma_search(self, query_emb: list, n: int) -> list[dict]:
@@ -263,9 +312,11 @@ class HybridRetriever:
 
     # ── Cross-encoder rerank ───────────────────────────────────────────────────
     def _rerank(self, query: str, docs: list[dict]) -> list[dict]:
+        global _XC_MODEL
         try:
-            if self._xc_model is None:
-                self._xc_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-128")
+            if _XC_MODEL is None:
+                _XC_MODEL = CrossEncoder(RERANKER_MODEL)
+            self._xc_model = _XC_MODEL
             texts = [d.get("chunk_text", "") for d in docs]
             scores = self._xc_model.predict(list(zip([query] * len(texts), texts)))
             scored = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)

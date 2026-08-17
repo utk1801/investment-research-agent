@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.app import render_sidebar, render_home
+from src.ui.app import render_sidebar
 
 
 def render_dashboard():
@@ -12,21 +12,15 @@ def render_dashboard():
     st.divider()
 
     st.markdown(
-        "The monitoring dashboard is powered by **Grafana** connected directly to "
-        "the PostgreSQL database.\n\n"
-        "Charts: query volume, latency, thumbs up/down ratio, rating distribution, "
-        "prompt variant usage, retrieval chunk counts."
+        "The monitoring dashboard is provisioned automatically by Docker and connects "
+        "to PostgreSQL through the `invest_agent_psql` datasource.\n\n"
+        "Charts: query volume, latency, thumbs up/down ratio, prompt variant usage, "
+        "retrieval chunk counts, cost, tokens, and recent queries."
     )
 
-    st.warning(
-        "⚠️ **Grafana is running but dashboard not yet imported.**\n\n"
-        "To import the dashboard:\n"
-        "1. Open [http://localhost:3000](http://localhost:3000) (admin / admin123)\n"
-        "2. Go to **Dashboards → Import**\n"
-        "3. Upload or paste the JSON from `grafana/provisioning/dashboards/invest_agent.json`"
-    )
+    st.info("Grafana login: `admin` / `admin123`")
 
-    st.link_button("🚀 Open Grafana", "http://localhost:3000", use_container_width=True)
+    st.link_button("Open Grafana", "http://localhost:3000", icon=":material/open_in_new:")
 
     st.divider()
 
@@ -52,5 +46,6 @@ def render_dashboard():
 
 
 if __name__ == "__main__":
-    render_home()
+    prefs = render_sidebar()
+    st.session_state["prefs"] = prefs
     render_dashboard()

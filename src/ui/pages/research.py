@@ -7,9 +7,7 @@ import time
 
 import streamlit as st
 
-from src.ui.app import render_home
-
-st.set_page_config(page_title="Research", page_icon="🔍", layout="wide")
+from src.ui.app import render_sidebar
 
 
 def render_research():
@@ -17,9 +15,13 @@ def render_research():
     selected_ticker = prefs.get("ticker", "")
     model = prefs.get("model", "gpt-4o")
     prompt_variant = prefs.get("prompt_variant", "A")
+    retrieval_approach = prefs.get("retrieval_approach", "hybrid_rerank")
+    rewrite_enabled = prefs.get("rewrite_query", True)
 
     st.title("🔍 Research")
     st.caption(f"Model: **{model}** · Prompt: **{prompt_variant}**" +
+               f" · Retrieval: **{retrieval_approach}**" +
+               (" · Query rewrite: **on**" if rewrite_enabled else " · Query rewrite: **off**") +
                (f" · Ticker filter: **{selected_ticker}**" if selected_ticker else ""))
 
     # History
@@ -48,7 +50,10 @@ def render_research():
 
         t0 = time.time()
         with st.spinner("Running retrieval + LLM synthesis..."):
-            response = _run_query(prompt, selected_ticker, model, prompt_variant)
+            response = _run_query(
+                prompt, selected_ticker, model, prompt_variant,
+                retrieval_approach, rewrite_enabled,
+            )
 
         elapsed = time.time() - t0
         with st.chat_message("assistant"):
@@ -63,6 +68,8 @@ def render_research():
                 st.caption(f"💰 {tokens:,} tokens ({pt:,}in / {ct:,}out) ≈ **${cost:.6f}** · Retrieved **{response['chunks']}** chunks")
             else:
                 st.caption(f"Retrieved **{response['chunks']}** chunks")
+            if response.get("rewritten_query") and response["rewritten_query"] != prompt:
+                st.caption(f"Rewritten query: {response['rewritten_query']}")
 
             if response.get("sources"):
                 with st.expander("📚 Sources"):
@@ -80,7 +87,14 @@ def render_research():
             "ts": time.time(),
         })
 
-def _run_query(prompt: str, ticker: str, model: str, prompt_variant: str) -> dict:
+def _run_query(
+    prompt: str,
+    ticker: str,
+    model: str,
+    prompt_variant: str,
+    retrieval_approach: str,
+    rewrite_enabled: bool,
+) -> dict:
     """Run the full query pipeline. Returns {answer, chunks, sources}."""
     from src.retrieval.retriever import HybridRetriever
     from src.llm.client import LLMClient
@@ -91,7 +105,12 @@ def _run_query(prompt: str, ticker: str, model: str, prompt_variant: str) -> dic
         t0 = time.time()
         retriever = HybridRetriever(ticker_filter=ticker or None)
         # Retrieve more than top_k to account for chunk dedup — keep best per doc
-        all_chunks = retriever.retrieve(prompt, top_k=RETRIEVAL_TOP_K_HYBRID)
+        all_chunks = retriever.retrieve(
+            prompt,
+            top_k=RETRIEVAL_TOP_K_HYBRID,
+            approach=retrieval_approach,
+            rewrite=rewrite_enabled,
+        )
         seen_doc_ids, chunks = set(), []
         for c in all_chunks:
             doc_id = c.get("doc_id")
@@ -108,11 +127,11 @@ def _run_query(prompt: str, ticker: str, model: str, prompt_variant: str) -> dic
         query_id = log_query(
             query_text=prompt,
             ticker_filter=ticker,
-            answer_preview=resp.answer[:100],
             retrieval_chunk_count=len(chunks),
             retrieval_time_ms=elapsed_ms,
             model=model,
             prompt_variant=prompt_variant,
+            rewritten_query=retriever.last_rewritten_query,
             prompt_tokens=resp.prompt_tokens,
             completion_tokens=resp.completion_tokens,
             total_tokens=resp.total_tokens,
@@ -138,6 +157,8 @@ def _run_query(prompt: str, ticker: str, model: str, prompt_variant: str) -> dic
             "cost_usd": resp.total_cost_usd,
             "prompt_tokens": resp.prompt_tokens,
             "completion_tokens": resp.completion_tokens,
+            "rewritten_query": retriever.last_rewritten_query,
+            "retrieval_approach": retrieval_approach,
         }
     except Exception as exc:
         return {
@@ -240,5 +261,6 @@ def _on_comment(feedback_key: str) -> None:
 
 
 if __name__ == "__main__":
-    render_home()
+    prefs = render_sidebar()
+    st.session_state["prefs"] = prefs
     render_research()
