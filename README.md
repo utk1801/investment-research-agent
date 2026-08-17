@@ -124,7 +124,6 @@ RAG Agent's response when context doesn't contain the required info:
 </table>
 
 ---
-<img width="1461" height="788" alt="grafana-screenshot" src="" />
 
 ## Setup
 
